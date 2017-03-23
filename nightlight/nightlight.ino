@@ -96,7 +96,7 @@ Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ80
 
 class Mode {
     int pixel_offset = 0;
-    int frame_delay = 0;
+    int frame_delay = 15;
     bool transitioning = false;
 
     public:
@@ -225,6 +225,11 @@ Mode *modes[MODE_MAX] = {
 };
 
 int curr_mode = 0;
+int next_tick = 0;
+void switch_mode(int new_mode) {
+    curr_mode = new_mode;
+    next_tick = 0;
+}
 
 void setup() {
     Serial.begin(9600);
@@ -233,7 +238,7 @@ void setup() {
 }
 
 void loop() {
-    static int tick_delay = 15;
+    int tick_delay = 15;
     power_button.update();
     mode_button.update();
     knob_button.update();
@@ -241,30 +246,31 @@ void loop() {
     if (power_button.is_pushed()) {
         if (curr_mode < 0) {
             Serial.println("power on");
-            curr_mode = MODE_WARM;
-            //modes[curr_mode]->setup();
-            tick_delay = 15;
+            switch_mode(MODE_WARM);
+            modes[curr_mode]->setup();
         }
         else {
             Serial.println("power off");
-            curr_mode = -1;
-            tick_delay = 15;/*
+            switch_mode(-1);
             for(int i=NUMPIXELS-1;i>=0;i--) {
                 pixels.setPixelColor(i, pixels.Color(0,0,0));
-                pixels.show();
-                delay(5);
-            }*/
+            }
+            pixels.show();
         }
     }
     else if (curr_mode >= 0) {
         if (mode_button.is_pushed()) {
-            curr_mode = (curr_mode+1) % MODE_MAX;
+            switch_mode((curr_mode+1) % MODE_MAX);
             modes[curr_mode]->setup();
         }
         else if (knob_button.is_pushed()) {
             modes[curr_mode]->handle_knob_pushed();
         }
-        modes[curr_mode]->loop();
+        if (millis() >= next_tick) {
+            next_tick = modes[curr_mode]->loop() + millis();
+        }
+        int till_next = next_tick - millis();
+        tick_delay = MIN(15, till_next);
     }
     delay(tick_delay);
 
@@ -274,5 +280,5 @@ void loop() {
         curr_mode = (curr_mode+1) % MODE_MAX;
         modes[curr_mode]->setup();
     }
-    */
+*/
 }
