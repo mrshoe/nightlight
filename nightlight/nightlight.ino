@@ -6,6 +6,8 @@
     #include <avr/power.h>
 #endif
 
+#include <Encoder.h>
+
 // Which pin on the Arduino is connected to the NeoPixels?
 // On a Trinket or Gemma we suggest changing this to 1
 #define PIN                        8
@@ -59,6 +61,7 @@ class Button {
     public:
     Button(int p) : pin(p) {
         pinMode(p, INPUT);
+        digitalWrite(p, HIGH);
     }
 
     void update() {
@@ -109,6 +112,28 @@ class RGBLED {
 
 RGBLED knob_led(6, 7, 8);
 
+class RotaryEncoder {
+    Encoder enc;
+    int value = 0;
+    int last_enc = 0;
+    int mult;
+
+    public:
+    RotaryEncoder(int e0, int e1, int m) : enc(e0, e1), mult(m) {}
+
+    void update() {
+        int curr_enc = enc.read();
+        int change = curr_enc - last_enc;
+        last_enc = curr_enc;
+        value -= change * mult;
+        value = min(255, max(0, value));
+    }
+
+    void set_mult(int m) { mult = m; }
+    int get_value() { return value; }
+};
+RotaryEncoder rotary_enc(3, 4, 2);
+
 class Mode {
     int pixel_offset = 0;
     int frame_delay = 15;
@@ -147,6 +172,7 @@ class Mode {
         return result;
     }
     void handle_knob_pushed() {}
+    void set_brightness(int b) { brightness = b; }
 };
 
 class SolidMode : public Mode {
@@ -261,6 +287,7 @@ void loop() {
     power_button.update();
     mode_button.update();
     knob_button.update();
+    rotary_enc.update();
 
     if (power_button.is_pushed()) {
         if (curr_mode < 0) {
@@ -286,6 +313,7 @@ void loop() {
             modes[curr_mode]->handle_knob_pushed();
         }
         if (millis() >= next_tick) {
+            modes[curr_mode]->set_brightness(rotary_enc.get_value());
             next_tick = modes[curr_mode]->loop() + millis();
         }
         int till_next = next_tick - millis();
