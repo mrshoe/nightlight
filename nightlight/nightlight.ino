@@ -307,10 +307,8 @@ void loop() {
     }
     else {
         if (mode_button.is_pushed()) {
-            /*
             curr_mode_idx = (curr_mode_idx+1) % MODE_MAX;
             switch_mode(modes[curr_mode_idx]);
-            */
         }
         else if (knob_button.is_pushed()) {
             curr_mode->handle_knob_pushed();
