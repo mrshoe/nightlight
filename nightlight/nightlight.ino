@@ -31,7 +31,7 @@ class Color {
     }
 
     friend Color operator*(Color lhs, int rhs) {
-        return Color((255*lhs.r) / rhs, (255*lhs.g) / rhs, (255*lhs.b) / rhs);
+        return Color((rhs*lhs.r) / 255, (rhs*lhs.g) / 255, (rhs*lhs.b) / 255);
     }
 };
 
@@ -114,7 +114,7 @@ RGBLED knob_led(6, 7, 8);
 
 class RotaryEncoder {
     Encoder enc;
-    int value = 0;
+    int value = 255;
     int last_enc = 0;
     int mult;
 
@@ -132,7 +132,7 @@ class RotaryEncoder {
     void set_mult(int m) { mult = m; }
     int get_value() { return value; }
 };
-RotaryEncoder rotary_enc(3, 4, 2);
+RotaryEncoder rotary_enc(3, 4, 4);
 
 class Mode {
     int pixel_offset = 0;
@@ -145,9 +145,9 @@ class Mode {
         pixel_offset = 0;
         transitioning = true;
     };
-    Color pixel_color(int idx) {}
-    int loop() {
-        int result = frame_delay;
+    virtual Color pixel_color(int idx) {}
+    unsigned long loop() {
+        unsigned long result = frame_delay;
         if (transitioning) {
             Color color = pixel_color(pixel_offset) * brightness;
             pixels.setPixelColor(pixel_offset, color.pxcolor());
@@ -172,7 +172,7 @@ class Mode {
         return result;
     }
     void handle_knob_pushed() {}
-    void set_brightness(int b) { brightness = b; }
+    void set_brightness(int b) { brightness = max(8, b); }
 };
 
 class SolidMode : public Mode {
@@ -187,6 +187,7 @@ class SolidMode : public Mode {
 SolidMode warm_mode(140, 110, 60);
 SolidMode red_mode(100, 0, 0);
 SolidMode white_mode(50, 50, 50);
+SolidMode off_mode(0, 0, 0);
 
 class RainbowMode : public Mode {
     Color pixel_color(int i) {
@@ -256,7 +257,6 @@ typedef enum {
     MODE_SEGMENTS,
     MODE_DASHES,
 
-
     MODE_MAX,
 } LightMode;
 
@@ -269,63 +269,58 @@ Mode *modes[MODE_MAX] = {
     &dashes_mode,
 };
 
-int curr_mode = -1;
-int next_tick = 0;
-void switch_mode(int new_mode) {
+int curr_mode_idx = 0;
+Mode *curr_mode = &off_mode;
+unsigned long next_tick = 0;
+void switch_mode(Mode *new_mode) {
     curr_mode = new_mode;
+    curr_mode->setup();
     next_tick = 0;
 }
 
 void setup() {
+#if defined (__AVR_ATtiny85__)
+    if (F_CPU == 16000000) clock_prescale_set(clock_div_1);
+#endif
+    pixels.begin();
+    pixels.show();
     Serial.begin(9600);
-    timers[TIMER_MODE].set(5000);
-    timers[TIMER_MODE].start();
 }
 
 void loop() {
-    int tick_delay = 15;
+    unsigned long tick_delay = 15;
     power_button.update();
     mode_button.update();
     knob_button.update();
     rotary_enc.update();
 
     if (power_button.is_pushed()) {
-        if (curr_mode < 0) {
+        if (curr_mode == &off_mode) {
             Serial.println("power on");
-            switch_mode(MODE_WARM);
-            modes[curr_mode]->setup();
+            switch_mode(modes[curr_mode_idx]);
         }
         else {
             Serial.println("power off");
-            switch_mode(-1);
-            for(int i=NUMPIXELS-1;i>=0;i--) {
-                pixels.setPixelColor(i, pixels.Color(0,0,0));
-            }
-            pixels.show();
+            curr_mode_idx = 0;
+            switch_mode(&off_mode);
         }
     }
-    else if (curr_mode >= 0) {
+    else {
         if (mode_button.is_pushed()) {
-            switch_mode((curr_mode+1) % MODE_MAX);
-            modes[curr_mode]->setup();
+            /*
+            curr_mode_idx = (curr_mode_idx+1) % MODE_MAX;
+            switch_mode(modes[curr_mode_idx]);
+            */
         }
         else if (knob_button.is_pushed()) {
-            modes[curr_mode]->handle_knob_pushed();
+            curr_mode->handle_knob_pushed();
         }
         if (millis() >= next_tick) {
-            modes[curr_mode]->set_brightness(rotary_enc.get_value());
-            next_tick = modes[curr_mode]->loop() + millis();
+            curr_mode->set_brightness(rotary_enc.get_value());
+            next_tick = curr_mode->loop() + millis();
         }
-        int till_next = next_tick - millis();
+        unsigned long till_next = next_tick - millis();
         tick_delay = min(15, till_next);
     }
     delay(tick_delay);
-
-/*
-    if (timers[TIMER_MODE].fired()) {
-        timers[TIMER_MODE].start();
-        curr_mode = (curr_mode+1) % MODE_MAX;
-        modes[curr_mode]->setup();
-    }
-*/
 }
