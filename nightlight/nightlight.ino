@@ -78,7 +78,7 @@ class Button {
     bool is_pushed() { return pushed; }
 };
 
-Button power_button(10), mode_button(11), knob_button(12);
+Button power_button(12), mode_button(13), knob_button(7);
 
 class LED {
     int pin;
@@ -92,25 +92,36 @@ class LED {
     }
 };
 
-LED power_led(4), mode_led(5);
+LED power_led(5), mode_led(3);
 
 class RGBLED {
     int rpin, gpin, bpin;
+    bool invert = false;
 
     public:
-    RGBLED(int rp, int gp, int bp) : rpin(rp), gpin(gp), bpin(bp) {
+    RGBLED(int rp, int gp, int bp, bool inv=false) :
+        rpin(rp), gpin(gp), bpin(bp), invert(inv) {
         pinMode(rp, OUTPUT);
         pinMode(gp, OUTPUT);
         pinMode(bp, OUTPUT);
     }
     void set_color(int r, int g, int b) {
-        analogWrite(rpin, r);
-        analogWrite(gpin, g);
-        analogWrite(bpin, b);
+        if (invert) {
+            analogWrite(rpin, (255-r));
+            analogWrite(gpin, (255-g));
+            analogWrite(bpin, (255-b));
+        }
+        else {
+            analogWrite(rpin, r);
+            analogWrite(gpin, g);
+            analogWrite(bpin, b);
+        }
     }
 };
 
-RGBLED knob_led(6, 7, 8);
+// knob_led's ground is wired to these pins
+// so, PWM values need to be inverted (255-val)
+RGBLED knob_led(11, 10, 9, true);
 
 class RotaryEncoder {
     Encoder enc;
@@ -132,7 +143,7 @@ class RotaryEncoder {
     void set_mult(int m) { mult = m; }
     int get_value() { return value; }
 };
-RotaryEncoder rotary_enc(3, 4, 4);
+RotaryEncoder rotary_enc(4, 2, 4);
 
 class Mode {
     int pixel_offset = 0;
@@ -250,9 +261,9 @@ class DashesMode : public Mode {
 DashesMode dashes_mode(0, 0, 80);
 
 typedef enum {
-    MODE_WARM,
     MODE_RED,
-    MODE_WHITE,
+    MODE_WARM,
+//    MODE_WHITE,
     MODE_RAINBOW,
     MODE_SEGMENTS,
     MODE_DASHES,
@@ -261,9 +272,8 @@ typedef enum {
 } LightMode;
 
 Mode *modes[MODE_MAX] = {
-    &warm_mode,
     &red_mode,
-    &white_mode,
+    &warm_mode,
     &rainbow_mode,
     &segment_mode,
     &dashes_mode,
@@ -278,6 +288,23 @@ void switch_mode(Mode *new_mode) {
     next_tick = 0;
 }
 
+void power_off() {
+    Serial.println("power off");
+    curr_mode_idx = 0;
+    switch_mode(&off_mode);
+    power_led.set_brightness(40);
+    mode_led.set_brightness(0);
+    knob_led.set_color(0, 0, 0);
+}
+
+void power_on() {
+    Serial.println("power on");
+    switch_mode(modes[curr_mode_idx]);
+    power_led.set_brightness(255);
+    mode_led.set_brightness(255);
+    knob_led.set_color(255, 255, 0);
+}
+
 void setup() {
 #if defined (__AVR_ATtiny85__)
     if (F_CPU == 16000000) clock_prescale_set(clock_div_1);
@@ -285,6 +312,7 @@ void setup() {
     pixels.begin();
     pixels.show();
     Serial.begin(9600);
+    power_off();
 }
 
 void loop() {
@@ -296,25 +324,24 @@ void loop() {
 
     if (power_button.is_pushed()) {
         if (curr_mode == &off_mode) {
-            Serial.println("power on");
-            switch_mode(modes[curr_mode_idx]);
+            power_on();
         }
         else {
-            Serial.println("power off");
-            curr_mode_idx = 0;
-            switch_mode(&off_mode);
+            power_off();
         }
     }
     else {
-        if (mode_button.is_pushed()) {
-            curr_mode_idx = (curr_mode_idx+1) % MODE_MAX;
-            switch_mode(modes[curr_mode_idx]);
-        }
-        else if (knob_button.is_pushed()) {
-            curr_mode->handle_knob_pushed();
+        if (curr_mode != &off_mode) {
+            if (mode_button.is_pushed()) {
+                curr_mode_idx = (curr_mode_idx+1) % MODE_MAX;
+                switch_mode(modes[curr_mode_idx]);
+            }
+            else if (knob_button.is_pushed()) {
+                curr_mode->handle_knob_pushed();
+            }
+            curr_mode->set_brightness(rotary_enc.get_value());
         }
         if (millis() >= next_tick) {
-            curr_mode->set_brightness(rotary_enc.get_value());
             next_tick = curr_mode->loop() + millis();
         }
         unsigned long till_next = next_tick - millis();
